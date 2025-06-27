@@ -408,9 +408,7 @@ ArgumentEncodingContext::clearColor(Rc<Texture> &&texture, unsigned viewId, unsi
   encoder_current = encoder_info;
 
   fence_alias_map_.unalias(encoder_info->id & kFenceIdMask);
-  auto allocation = texture->current();
-  encoder_info->texture = texture->view(viewId, allocation);
-  encoder_info->fence_wait_one = trackTexture(allocation, DXMT_ENCODER_RESOURCE_ACESS_WRITE);
+  encoder_info->texture = access(texture, viewId, DXMT_ENCODER_RESOURCE_ACESS_WRITE).texture;
 
   currentFrameStatistics().clear_pass_count++;
 
@@ -433,9 +431,7 @@ ArgumentEncodingContext::clearDepthStencil(
   encoder_current = encoder_info;
 
   fence_alias_map_.unalias(encoder_info->id & kFenceIdMask);
-  auto allocation = texture->current();
-  encoder_info->texture = texture->view(viewId, allocation);
-  encoder_info->fence_wait_one = trackTexture(allocation, DXMT_ENCODER_RESOURCE_ACESS_WRITE);
+  encoder_info->texture = access(texture, viewId, DXMT_ENCODER_RESOURCE_ACESS_WRITE).texture;
 
   currentFrameStatistics().clear_pass_count++;
   
@@ -898,8 +894,9 @@ ArgumentEncodingContext::flushCommands(WMT::CommandBuffer cmdbuf, uint64_t seqId
         info.render_target_array_length = data->array_length;
         auto encoder = cmdbuf.renderCommandEncoder(info);
         encoder.setLabel(WMT::String::string("ClearPass", WMTUTF8StringEncoding));
-        if (FenceIsValid(data->fence_wait_one))
-          encoder.waitForFence(fence_pool_[data->fence_wait_one & kFenceIdMask], WMTRenderStageFragment);
+        data->fence_wait.forEach(fence_alias_map_, [&](FenceId id) {
+          encoder.waitForFence(fence_pool_[id], WMTRenderStageFragment);
+        });
         encoder.updateFence(fence_pool_[data->id & kFenceIdMask], WMTRenderStageFragment);
         encoder.endEncoding();
       }
@@ -1029,8 +1026,7 @@ ArgumentEncodingContext::checkEncoderRelation(EncoderData *former, EncoderData *
           currentFrameStatistics().clear_pass_optimized++;
           assert(render->fence_wait.contains(clear->id & kFenceIdMask));
           render->fence_wait.remove(clear->id & kFenceIdMask);
-          if (FenceIsValid(clear->fence_wait_one))
-            render->fence_wait.add(clear->fence_wait_one);
+          render->fence_wait.merge(clear->fence_wait);
           fence_alias_map_.alias(clear->id & kFenceIdMask, render->id & kFenceIdMask);
           clear->~ClearEncoderData();
           clear->next = nullptr;
@@ -1044,8 +1040,7 @@ ArgumentEncodingContext::checkEncoderRelation(EncoderData *former, EncoderData *
             attachment->clear_color = clear->color;
             assert(render->fence_wait.contains(clear->id & kFenceIdMask));
             render->fence_wait.remove(clear->id & kFenceIdMask);
-            if (FenceIsValid(clear->fence_wait_one))
-              render->fence_wait.add(clear->fence_wait_one);
+            render->fence_wait.merge(clear->fence_wait);
             fence_alias_map_.alias(clear->id & kFenceIdMask, render->id & kFenceIdMask);
           }
 
